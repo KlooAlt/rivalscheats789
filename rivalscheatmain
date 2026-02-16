@@ -1,15 +1,16 @@
 if not game:IsLoaded() then game.Loaded:Wait() end
 
-local Obsidian = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
-
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 local Mouse = LocalPlayer:GetMouse()
+
+local Obsidian = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
 
 local State = {
     Combat = {
@@ -39,61 +40,29 @@ local State = {
     }
 }
 
-local function InitializeGunMods()
-    task.spawn(function()
-        while task.wait(1) do
-            if State.Guns.UnlockSkins then
-                pcall(function()
-                    local PlayerData = ReplicatedStorage:FindFirstChild("PlayerData")
-                    if PlayerData then
-                        local Inventory = PlayerData:FindFirstChild(LocalPlayer.Name)
-                        if Inventory then
-                            for _, v in pairs(Inventory:GetDescendants()) do
-                                if v:IsA("BoolValue") and (v.Name == "Unlocked" or v.Name == "Owned") then
-                                    v.Value = true
-                                end
-                            end
-                        end
-                    end
-                end)
-            end
-        end
-    end)
-end
-
-local oldIndex
-local oldNamecall
-
-oldIndex = hookmetamethod(game, "__index", function(self, key)
-    if not checkcaller() then
-        if key == "Clips" and State.Guns.InfiniteAmmo then return 999 end
-        if key == "Recoil" and State.Guns.NoRecoil then return 0 end
-        if key == "Spread" and State.Guns.NoSpread then return 0 end
-    end
-    return oldIndex(self, key)
-end)
-
-local function IsVisible(part)
-    local origin = Camera.CFrame.Position
-    local direction = (part.Position - origin).Unit * (part.Position - origin).Magnitude
-    local rayParams = RaycastParams.new()
-    rayParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
-    rayParams.FilterType = Enum.RaycastFilterType.Exclude
-    local result = Workspace:Raycast(origin, direction, rayParams)
-    return result == nil or result.Instance:IsDescendantOf(part.Parent)
-end
+local ESP_Objects = {}
+local FOV_Circle = Drawing.new("Circle")
+FOV_Circle.Thickness = 1
+FOV_Circle.NumSides = 32
 
 local function GetTarget()
     local target = nil
     local dist = State.Combat.FOV
-    for _, p in pairs(Players:GetPlayers()) do
+    for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild(State.Combat.TargetPart) then
             if State.Combat.TeamCheck and p.Team == LocalPlayer.Team then continue end
-            local pos, onScreen = Camera:WorldToViewportPoint(p.Character[State.Combat.TargetPart].Position)
+            
+            local part = p.Character[State.Combat.TargetPart]
+            local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
+            
             if onScreen then
                 local mouseDist = (Vector2.new(pos.X, pos.Y) - Vector2.new(Mouse.X, Mouse.Y)).Magnitude
                 if mouseDist < dist then
-                    if State.Combat.VisibleCheck and not IsVisible(p.Character[State.Combat.TargetPart]) then continue end
+                    if State.Combat.VisibleCheck then
+                        local ray = Camera:ViewportPointToRay(pos.X, pos.Y)
+                        local hit = Workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character, Camera})
+                        if hit and not hit:IsDescendantOf(p.Character) then continue end
+                    end
                     dist = mouseDist
                     target = p
                 end
@@ -103,45 +72,74 @@ local function GetTarget()
     return target
 end
 
-local ESP_Lines = {}
-local FOV_Circle = Drawing.new("Circle")
+local oldIndex
+oldIndex = hookmetamethod(game, "__index", function(self, key)
+    if not checkcaller() then
+        if key == "Clips" and State.Guns.InfiniteAmmo then return 999 end
+        if key == "Recoil" and State.Guns.NoRecoil then return 0 end
+        if key == "Spread" and State.Guns.NoSpread then return 0 end
+    end
+    return oldIndex(self, key)
+end)
 
-local function CreateESP(player)
-    local line = Drawing.new("Line")
-    line.Thickness = 1.5
-    ESP_Lines[player] = line
-end
+task.spawn(function()
+    while task.wait(5) do
+        if State.Guns.UnlockSkins then
+            pcall(function()
+                local PlayerData = ReplicatedStorage:FindFirstChild("PlayerData")
+                if PlayerData then
+                    local Inventory = PlayerData:FindFirstChild(LocalPlayer.Name)
+                    if Inventory then
+                        for _, v in ipairs(Inventory:GetDescendants()) do
+                            if v:IsA("BoolValue") and (v.Name == "Unlocked" or v.Name == "Owned") then
+                                v.Value = true
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
 
-local Window = Obsidian.new("DEATHBYTE RIVALS | v4.0")
+local Window = Obsidian.new("DEATHBYTE RIVALS | v4.0 FIX")
 
 local TabC = Window:Tab("Combat")
-TabC:Section("Main Aimbot")
+TabC:Section("Aimbot")
 TabC:Toggle("Aimbot Enabled", function(s) State.Combat.Aimbot = s end)
-TabC:Toggle("Silent Aim (Risk)", function(s) State.Combat.SilentAim = s end)
-TabC:Slider("Aim Smooth", 1, 100, 5, function(v) State.Combat.Smoothing = v/100 end)
-TabC:Slider("Aim FOV", 30, 800, 100, function(v) State.Combat.FOV = v end)
-TabC:Dropdown("Target", {"Head", "HumanoidRootPart"}, function(v) State.Combat.TargetPart = v end)
+TabC:Toggle("Silent Aim", function(s) State.Combat.SilentAim = s end)
+TabC:Slider("Smoothness", 1, 100, 5, function(v) State.Combat.Smoothing = v/100 end)
+TabC:Slider("FOV Size", 30, 800, 100, function(v) State.Combat.FOV = v end)
+TabC:Dropdown("Target Part", {"Head", "HumanoidRootPart"}, function(v) State.Combat.TargetPart = v end)
+TabC:Toggle("Visible Check", function(s) State.Combat.VisibleCheck = s end)
+TabC:Toggle("Team Check", function(s) State.Combat.TeamCheck = s end)
 
 local TabV = Window:Tab("Visuals")
-TabV:Toggle("ESP Master", function(s) State.Visuals.Enabled = s end)
+TabV:Toggle("Master Switch", function(s) State.Visuals.Enabled = s end)
 TabV:Toggle("Box ESP", function(s) State.Visuals.Boxes = s end)
+TabV:Toggle("Tracers", function(s) State.Visuals.Tracers = s end)
 TabV:Toggle("Rainbow Mode", function(s) State.Visuals.Rainbow = s end)
-TabV:Toggle("Show Tracers", function(s) State.Visuals.Tracers = s end)
+TabV:Slider("Field of View", 70, 120, 70, function(v) Camera.FieldOfView = v end)
 
-local TabG = Window:Tab("Skins/Guns")
+local TabG = Window:Tab("Guns")
 TabG:Button("UNLOCK ALL SKINS", function() 
     State.Guns.UnlockSkins = true 
     Obsidian:Notification("Skins Spoofed", "All weapons unlocked locally!")
 end)
-TabG:Section("Weapon Mods")
 TabG:Toggle("No Recoil", function(s) State.Guns.NoRecoil = s end)
 TabG:Toggle("No Spread", function(s) State.Guns.NoSpread = s end)
-TabG:Toggle("Insta-Reload", function(s) State.Guns.FastReload = s end)
+TabG:Toggle("Infinite Ammo", function(s) State.Guns.InfiniteAmmo = s end)
+TabG:Toggle("Rapid Fire", function(s) State.Guns.RapidFire = s end)
 
 local TabM = Window:Tab("Movement")
-TabM:Slider("Walkspeed", 16, 150, 16, function(v) State.Movement.Speed = v end)
-TabM:Toggle("Infinite Jump", function(s) State.Movement.InfJump = s end)
+TabM:Slider("Walkspeed", 16, 200, 16, function(v) State.Movement.Speed = v end)
 TabM:Toggle("Noclip", function(s) State.Movement.Noclip = s end)
+TabM:Toggle("Infinite Jump", function(s) State.Movement.InfJump = s end)
+TabM:Toggle("Fly", function(s) State.Movement.Fly = s end)
+
+local TabW = Window:Tab("World")
+TabW:Toggle("Fullbright", function(s) State.World.Fullbright = s end)
+TabW:Slider("Gravity", 0, 196, 196, function(v) Workspace.Gravity = v end)
 
 RunService.RenderStepped:Connect(function()
     local rainbow = Color3.fromHSV(tick() % 5 / 5, 1, 1)
@@ -154,8 +152,14 @@ RunService.RenderStepped:Connect(function()
 
     local target = GetTarget()
     if target and target.Character then
+        local aimPart = target.Character[State.Combat.TargetPart]
+        local aimPos = aimPart.Position
+        
+        if State.Combat.Prediction > 0 then
+            aimPos = aimPos + (aimPart.Velocity * State.Combat.Prediction)
+        end
+
         if State.Combat.Aimbot then
-            local aimPos = target.Character[State.Combat.TargetPart].Position
             Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, aimPos), State.Combat.Smoothing)
         end
     end
@@ -164,44 +168,70 @@ RunService.RenderStepped:Connect(function()
         LocalPlayer.Character.Humanoid.WalkSpeed = State.Movement.Speed
         
         if State.Movement.Noclip then
-            for _, v in pairs(LocalPlayer.Character:GetDescendants()) do
+            for _, v in ipairs(LocalPlayer.Character:GetChildren()) do
                 if v:IsA("BasePart") then v.CanCollide = false end
+            end
+        end
+
+        if State.Movement.Fly then
+            local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if root then
+                root.Velocity = Vector3.new(0, 0.1, 0)
             end
         end
     end
 
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-            if State.Visuals.Enabled then
-                local root = p.Character.HumanoidRootPart
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local root = p.Character:FindFirstChild("HumanoidRootPart")
+            
+            if State.Visuals.Enabled and root then
                 local screenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+                
+                local highlight = p.Character:FindFirstChild("DB_Highlight")
+                if State.Visuals.Boxes or State.Visuals.Chams then
+                    if not highlight then
+                        highlight = Instance.new("Highlight", p.Character)
+                        highlight.Name = "DB_Highlight"
+                    end
+                    highlight.Enabled = true
+                    highlight.FillColor = espCol
+                elseif highlight then
+                    highlight.Enabled = false
+                end
 
                 if State.Visuals.Tracers and onScreen then
-                    if not ESP_Lines[p] then CreateESP(p) end
-                    local l = ESP_Lines[p]
+                    if not ESP_Objects[p] then
+                        ESP_Objects[p] = Drawing.new("Line")
+                        ESP_Objects[p].Thickness = 1.5
+                    end
+                    local l = ESP_Objects[p]
                     l.Visible = true
                     l.From = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y)
                     l.To = Vector2.new(screenPos.X, screenPos.Y)
                     l.Color = espCol
-                else
-                    if ESP_Lines[p] then ESP_Lines[p].Visible = false end
+                elseif ESP_Objects[p] then
+                    ESP_Objects[p].Visible = false
                 end
-
-                local highlight = p.Character:FindFirstChild("Deathbyte_ESP") or Instance.new("Highlight", p.Character)
-                highlight.Name = "Deathbyte_ESP"
-                highlight.Enabled = State.Visuals.Boxes
-                highlight.FillColor = espCol
-                highlight.OutlineColor = Color3.new(1,1,1)
+            else
+                if ESP_Objects[p] then ESP_Objects[p].Visible = false end
+                local h = p.Character:FindFirstChild("DB_Highlight")
+                if h then h.Enabled = false end
             end
         end
+    end
+
+    if State.World.Fullbright then
+        Lighting.Brightness = 2
+        Lighting.ClockTime = 14
+        Lighting.FogEnd = 100000
     end
 end)
 
 UserInputService.JumpRequest:Connect(function()
-    if State.Movement.InfJump and LocalPlayer.Character then
+    if State.Movement.InfJump and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
         LocalPlayer.Character.Humanoid:ChangeState("Jumping")
     end
 end)
 
-InitializeGunMods()
-print("DEATHBYTE v4.0 LOADED - 100+ FEATURES ACTIVE")
+print("DEATHBYTE v4.0 LOADED")
